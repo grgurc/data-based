@@ -1,4 +1,4 @@
-package main
+package config
 
 import (
 	"fmt"
@@ -29,7 +29,7 @@ func (cfg *dbConfig) dataSourceName() string {
 	)
 }
 
-func newConfig() dbConfig {
+func NewConfig() dbConfig {
 	return dbConfig{
 		user:     "root",
 		password: "test",
@@ -39,7 +39,7 @@ func newConfig() dbConfig {
 	}
 }
 
-func newDB(config dbConfig) *sqlx.DB {
+func NewDB(config dbConfig) *sqlx.DB {
 	db, err := sqlx.Open("mysql", config.dataSourceName())
 	if err != nil {
 		panic(err)

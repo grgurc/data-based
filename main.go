@@ -1,13 +1,14 @@
 package main
 
 import (
-	"fmt"
+	"io"
 	"log"
-	"time"
+	"os"
 
 	"github.com/gdamore/tcell/v2"
-	"github.com/grgurc/data-based/drawables"
+	"github.com/grgurc/data-based/config"
 	"github.com/grgurc/data-based/query"
+	"github.com/grgurc/data-based/view"
 )
 
 func drawText(s tcell.Screen, x1, y1, x2, y2 int, style tcell.Style, text string) {
@@ -62,21 +63,21 @@ func drawBox(s tcell.Screen, x1, y1, x2, y2 int, style tcell.Style, text string)
 	drawText(s, x1+1, y1+1, x2-1, y2-1, style, text)
 }
 
-func renderDrawable(s tcell.Screen, style tcell.Style, d drawables.Drawable) {
-	content := d.Draw()
-	for i, row := range content {
-		for j, cellContent := range row {
-			s.SetContent(j, i, cellContent, nil, style)
-		}
+func main() {
+	f, err := os.OpenFile("./logs.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
+	if err != nil {
+		log.Fatalf("error opening file: %v", err)
 	}
-}
+	defer f.Close()
+	wrt := io.Writer(f)
+	log.SetOutput(wrt)
 
-func main2() {
-	db := newDB(newConfig())
-	q := query.NewQuery(db, "SELECT * FROM administrators;")
+	db := config.NewDB(config.NewConfig())
+	q := query.NewQuery(db, "SELECT * FROM workspace_members")
 	q.Run()
 
-	table := q.Drawable(120, 60)
+	// view.NewTable(nil, q.(*query.SelectQuery))
+	// return
 
 	defStyle := tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
 
@@ -97,10 +98,60 @@ func main2() {
 		maybePanic := recover()
 		s.Fini()
 		if maybePanic != nil {
+			log.Fatalf("%+v", maybePanic)
 			panic(maybePanic)
 		}
 	}
 	defer quit()
+
+	// handle table types
+	switch q := q.(type) {
+	case *query.SelectQuery:
+		table := view.NewTable(s, q)
+		table.Loop()
+	case *query.FailedQuery:
+		panic(q.Error())
+	case *query.ExecQuery:
+		return
+	}
+}
+
+/*
+
+func main2() {
+	db := newDB(newConfig())
+	q := query.NewQuery(db, "SELECT * FROM administrators;")
+	q.Run()
+
+	table := q.Drawable(120, 60)
+
+	defStyle := tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
+
+	// Initialize screen
+	s, err := tcell.NewScreen()
+	if err != nil {
+		log.Fatalf("%+v", err)
+	}
+	if err := s.Init(); err != nil {
+		log.Fatalf("%+v", err)
+	}
+	s.SetStyle(defStyle)
+
+	fmt.Println(s.Size())
+
+	quit := func() {
+		// You have to catch panics in a defer, clean up, and
+		// re-raise them - otherwise your application can
+		// die without leaving any diagnostic trace.
+		maybePanic := recover()
+		s.Fini()
+		if maybePanic != nil {
+			panic(maybePanic)
+		}
+	}
+	defer quit()
+
+	return
 
 	for {
 		renderDrawable(s, defStyle, table)
@@ -135,3 +186,5 @@ func main3() {
 	l, _ := time.LoadLocation("Asia/Almaty")
 	fmt.Println(a.In(l))
 }
+
+*/

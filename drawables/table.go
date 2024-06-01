@@ -1,5 +1,6 @@
 package drawables
 
+/*
 import (
 	"github.com/gdamore/tcell/v2"
 )
@@ -16,6 +17,8 @@ type scrollTable struct {
 	x, y    int // position of top left corner relative to drawn table data
 	w, h    int // total table dimensions
 	columns []*column
+	header  []string
+	body    []string
 }
 
 func leftPadded(str string, size int) []rune {
@@ -176,3 +179,4 @@ func NewScrollTable(w, h int, header [][]string, body [][]string) *scrollTable {
 		body:   body,
 	}
 }
+*/

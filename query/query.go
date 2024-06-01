@@ -3,33 +3,31 @@ package query
 import (
 	"database/sql"
 	"errors"
-	"fmt"
 	"strings"
 
-	"github.com/grgurc/data-based/drawables"
 	"github.com/jmoiron/sqlx"
 )
 
 type Query interface {
-	Query() string
-	Run()
-	Drawable(w, h int) drawables.Drawable
+	Query() string // returns query string
+	Run()          // actually runs the query
+	Error() string
 }
 
-type selectQuery struct {
+type SelectQuery struct {
 	db       *sqlx.DB
 	query    string
-	colNames []string
-	colTypes []string
-	rows     [][]string
+	ColNames []string
+	ColTypes []string
+	Rows     [][]string
 	err      error
 }
 
-func (q *selectQuery) Query() string {
+func (q *SelectQuery) Query() string {
 	return q.query
 }
 
-func (q *selectQuery) Run() {
+func (q *SelectQuery) Run() {
 	rows, err := q.db.Queryx(q.query)
 	if err != nil {
 		q.err = err
@@ -43,8 +41,8 @@ func (q *selectQuery) Run() {
 	}
 
 	for _, t := range colTypes {
-		q.colNames = append(q.colNames, t.Name())
-		q.colTypes = append(q.colTypes, strings.ToUpper(t.DatabaseTypeName()))
+		q.ColNames = append(q.ColNames, t.Name())
+		q.ColTypes = append(q.ColTypes, strings.ToUpper(t.DatabaseTypeName()))
 	}
 
 	for rows.Next() {
@@ -67,29 +65,30 @@ func (q *selectQuery) Run() {
 				stringValues[i] = "NULL"
 			}
 		}
-		q.rows = append(q.rows, stringValues)
+		q.Rows = append(q.Rows, stringValues)
+	}
+}
+
+func (q *SelectQuery) Error() string {
+	if q.err != nil {
+		return q.err.Error()
 	}
 
-	fmt.Println(q.colNames, q.colTypes)
+	return ""
 }
 
-// TODO -> rework how dimensions are passed in if needed
-func (q *selectQuery) Drawable(w, h int) drawables.Drawable {
-	return drawables.NewTable(w, h, [][]string{q.colNames, q.colTypes}, q.rows)
-}
-
-type execQuery struct {
+type ExecQuery struct {
 	db           *sqlx.DB
 	query        string
 	rowsAffected int64
 	err          error
 }
 
-func (q *execQuery) Query() string {
+func (q *ExecQuery) Query() string {
 	return q.query
 }
 
-func (q *execQuery) Run() {
+func (q *ExecQuery) Run() {
 	res, err := q.db.Exec(q.query)
 	if err != nil {
 		q.err = err
@@ -104,26 +103,26 @@ func (q *execQuery) Run() {
 	q.rowsAffected = rows
 }
 
-func (q *execQuery) Drawable(w, h int) drawables.Drawable {
-	return nil
-}
+func (q *ExecQuery) Error() string {
+	if q.err != nil {
+		return q.err.Error()
+	}
 
-func (q *execQuery) Success() bool {
-	return q.err == nil
-}
-
-type failedQuery struct {
-	err error
-}
-
-func (q *failedQuery) Query() string {
 	return ""
 }
 
-func (q *failedQuery) Run() {}
+type FailedQuery struct {
+	err error
+}
 
-func (q *failedQuery) Drawable(w, h int) drawables.Drawable {
-	return nil
+func (q *FailedQuery) Query() string {
+	return ""
+}
+
+func (q *FailedQuery) Run() {}
+
+func (q *FailedQuery) Error() string {
+	return q.err.Error()
 }
 
 // figure out if select or other type of query and create it
@@ -135,26 +134,26 @@ func NewQuery(db *sqlx.DB, query string) Query {
 
 	err := db.Ping()
 	if err != nil {
-		return &failedQuery{
+		return &FailedQuery{
 			err: errors.New("Couldn't connect to database"),
 		}
 	}
 
 	qType, _, found := strings.Cut(query, " ")
 	if !found {
-		return &failedQuery{
+		return &FailedQuery{
 			err: errors.New("Malformed query"),
 		}
 	}
 
 	switch strings.ToUpper(qType) {
 	case "SELECT":
-		return &selectQuery{
+		return &SelectQuery{
 			db:    db,
 			query: query,
 		}
 	default:
-		return &execQuery{
+		return &ExecQuery{
 			db:    db,
 			query: query,
 		}
