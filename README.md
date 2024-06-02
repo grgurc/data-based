@@ -12,3 +12,4 @@
 * edit table view (edit rows / columns inplace)
 * add other SQL drivers
 	* connection string input at startup or something
+* add query autocomplete?
