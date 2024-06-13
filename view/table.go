@@ -226,6 +226,8 @@ func (t *Table) Loop() {
 			if e.Key() == tcell.KeyLeft {
 				t.CursorLeft()
 			}
+		case *tcell.EventMouse:
+			continue
 		}
 
 		t.Render()

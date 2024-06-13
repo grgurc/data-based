@@ -72,8 +72,8 @@ func main() {
 	wrt := io.Writer(f)
 	log.SetOutput(wrt)
 
-	db := config.NewDB(config.NewConfig())
-	q := query.NewQuery(db, "SELECT * FROM workspace_members")
+	db := config.NewDbFromYaml("config/config_default.yml") // replace with your config
+	q := query.NewQuery(db, "SELECT * FROM workspaces")
 	q.Run()
 
 	// view.NewTable(nil, q.(*query.SelectQuery))

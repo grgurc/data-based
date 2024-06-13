@@ -2,44 +2,51 @@ package config
 
 import (
 	"fmt"
+	"os"
 
 	_ "github.com/go-sql-driver/mysql"
 	"github.com/jmoiron/sqlx"
+	"gopkg.in/yaml.v2"
 )
 
-// TODO -> connect using different drivers,
-// give the user ability to select them
+// TODO -> connect using different drivers
 
-type dbConfig struct {
-	user     string
-	password string
-	host     string
-	port     string
-	database string
+type mySql struct {
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+	Host     string `yaml:"host"`
+	Port     string `yaml:"port"`
+	Database string `yaml:"database"`
 }
 
-func (cfg *dbConfig) dataSourceName() string {
+func (cfg *mySql) dataSourceName() string {
 	return fmt.Sprintf(
 		"%s:%s@tcp(%s:%s)/%s?charset=utf8mb4&parseTime=True",
-		cfg.user,
-		cfg.password,
-		cfg.host,
-		cfg.port,
-		cfg.database,
+		cfg.User,
+		cfg.Password,
+		cfg.Host,
+		cfg.Port,
+		cfg.Database,
 	)
 }
 
-func NewConfig() dbConfig {
-	return dbConfig{
-		user:     "root",
-		password: "test",
-		host:     "localhost",
-		port:     "3306",
-		database: "b2match",
+func newConfig(fileName string) mySql {
+	data, err := os.ReadFile(fileName)
+	if err != nil {
+		panic(err)
 	}
+
+	var c mySql
+	if err = yaml.Unmarshal(data, &c); err != nil {
+		fmt.Println(err)
+	}
+
+	return c
 }
 
-func NewDB(config dbConfig) *sqlx.DB {
+func NewDbFromYaml(fileName string) *sqlx.DB {
+	config := newConfig(fileName)
+
 	db, err := sqlx.Open("mysql", config.dataSourceName())
 	if err != nil {
 		panic(err)
