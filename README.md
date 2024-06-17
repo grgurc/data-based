@@ -6,10 +6,8 @@
 * query input (type query and run)
 * rows affected view (result of INSERT / UPDATE / DELETE)
 ## TODO
-* make pretty (padding around table)
-* status bar / help / command list
-	* add commands / hotkeys
-* edit table view (edit rows / columns inplace)
+* composable views - check out gocui (https://github.com/jesseduffield/lazygit/tree/master/vendor/github.com/jesseduffield/gocui)
+	* status bar / help / command list
+	* edit table view (edit rows / columns inplace)
 * add other SQL drivers
-	* connection string input at startup or something
-* add query autocomplete?
+* sql autocomplete - check out sqlautocomplete (https://github.com/modeldba/sql-autocomplete)
