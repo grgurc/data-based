@@ -1,48 +1,83 @@
 package query
 
 import (
+	"bytes"
 	"database/sql"
 	"errors"
+	"fmt"
+	"io"
 	"strings"
+	"text/tabwriter"
 
 	"github.com/jmoiron/sqlx"
 )
 
 type Query interface {
-	Query() string // returns query string
-	Run()          // actually runs the query
-	Error() string
+	Write(w io.Writer) error
 }
 
 type SelectQuery struct {
-	db       *sqlx.DB
 	query    string
-	ColNames []string
-	ColTypes []string
-	Rows     [][]string
-	err      error
+	colNames []string
+	colTypes []string
+	rows     [][]string
 }
 
-func (q *SelectQuery) Query() string {
-	return q.query
-}
+func (q *SelectQuery) Write(w io.Writer) error {
+	joined := [][]string{
+		q.colNames,
+		q.colTypes,
+	}
+	joined = append(joined, q.rows...)
 
-func (q *SelectQuery) Run() {
-	rows, err := q.db.Queryx(q.query)
+	b := new(bytes.Buffer)
+	tw := tabwriter.NewWriter(b, 0, 0, 2, ' ', tabwriter.AlignRight|tabwriter.Debug)
+	for _, row := range joined {
+		tw.Write([]byte(strings.Join(row, "\t") + "\t\n"))
+	}
+	tw.Flush()
+
+	// now b contains the whole table
+	// we need to read the first 2 lines
+	colNames, err := b.ReadString('\n')
 	if err != nil {
-		q.err = err
-		return
+		return err
+	}
+	colTypes, err := b.ReadString('\n')
+	if err != nil {
+		return err
+	}
+
+	// doesn't seem very efficient but oh well
+	sep := strings.Repeat("-", len(colNames)-1) + "\n"
+
+	// write back out w including separation line
+	w.Write([]byte(colNames))
+	w.Write([]byte(colTypes))
+	w.Write([]byte(sep))
+	w.Write(b.Bytes())
+
+	return nil
+}
+
+func NewSelectQuery(db *sqlx.DB, query string) (*SelectQuery, error) {
+	q := &SelectQuery{
+		query: query,
+	}
+
+	rows, err := db.Queryx(query)
+	if err != nil {
+		return nil, err
 	}
 
 	colTypes, err := rows.ColumnTypes()
 	if err != nil {
-		q.err = err
-		return
+		return nil, err
 	}
 
 	for _, t := range colTypes {
-		q.ColNames = append(q.ColNames, t.Name())
-		q.ColTypes = append(q.ColTypes, strings.ToUpper(t.DatabaseTypeName()))
+		q.colNames = append(q.colNames, t.Name())
+		q.colTypes = append(q.colTypes, strings.ToUpper(t.DatabaseTypeName()))
 	}
 
 	for rows.Next() {
@@ -53,8 +88,7 @@ func (q *SelectQuery) Run() {
 
 		err = rows.Scan(values...)
 		if err != nil {
-			q.err = err
-			return
+			return nil, err
 		}
 
 		stringValues := make([]string, len(values))
@@ -65,101 +99,93 @@ func (q *SelectQuery) Run() {
 				stringValues[i] = "NULL"
 			}
 		}
-		q.Rows = append(q.Rows, stringValues)
-	}
-}
-
-func (q *SelectQuery) Error() string {
-	if q.err != nil {
-		return q.err.Error()
+		q.rows = append(q.rows, stringValues)
 	}
 
-	return ""
+	return q, nil
 }
 
 type ExecQuery struct {
-	db           *sqlx.DB
 	query        string
 	rowsAffected int64
-	err          error
+	lastInsertId int64
 }
 
-func (q *ExecQuery) Query() string {
-	return q.query
+func (q *ExecQuery) Write(w io.Writer) error {
+	fmt.Fprintln(w, "Query:")
+	fmt.Fprintln(w, q.query)
+	fmt.Fprintln(w)
+
+	fmt.Fprintln(w, "Rows affected:")
+	fmt.Fprintln(w, q.rowsAffected)
+	fmt.Fprintln(w)
+
+	fmt.Fprintln(w, "Last inserted id:")
+	fmt.Fprintln(w, q.lastInsertId)
+	fmt.Fprintln(w)
+
+	return nil
 }
 
-func (q *ExecQuery) Run() {
-	res, err := q.db.Exec(q.query)
+func NewExecQuery(db *sqlx.DB, query string) (*ExecQuery, error) {
+	res, err := db.Exec(query)
 	if err != nil {
-		q.err = err
-		return
+		return nil, err
 	}
 
 	rows, err := res.RowsAffected()
 	if err != nil {
-		q.err = err
-		return
-	}
-	q.rowsAffected = rows
-}
-
-func (q *ExecQuery) Error() string {
-	if q.err != nil {
-		return q.err.Error()
+		return nil, err
 	}
 
-	return ""
+	last, err := res.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+
+	return &ExecQuery{
+		query:        query,
+		rowsAffected: rows,
+		lastInsertId: last,
+	}, nil
 }
 
-type FailedQuery struct {
-	err error
-}
-
-func (q *FailedQuery) Query() string {
-	return ""
-}
-
-func (q *FailedQuery) Run() {}
-
-func (q *FailedQuery) Error() string {
-	return q.err.Error()
-}
-
-// figure out if select or other type of query and create it
-// Question for self: Should this return an error, and if so, which kind and where should it be handled?
-func NewQuery(db *sqlx.DB, query string) Query {
+func New(db *sqlx.DB, queryString string) (Query, error) {
 	if db == nil {
-		panic("No database connection supplied")
+		return nil, errors.New("no database connection supplied")
 	}
 
+	// this is not necessary, should be done by the app during init
 	err := db.Ping()
 	if err != nil {
-		return &FailedQuery{
-			err: errors.New("Couldn't connect to database"),
-		}
+		return nil, err
 	}
 
-	qType, _, found := strings.Cut(query, " ")
+	qType, _, found := strings.Cut(queryString, " ")
 	if !found {
-		return &FailedQuery{
-			err: errors.New("Malformed query"),
-		}
+		return nil, err
 	}
 
 	switch strings.ToUpper(qType) {
 	case "SELECT":
-		return &SelectQuery{
-			db:    db,
-			query: query,
-		}
+		return NewSelectQuery(db, queryString)
 	default:
-		return &ExecQuery{
-			db:    db,
-			query: query,
-		}
+		return NewExecQuery(db, queryString)
 	}
 }
 
+/*
+// this should be reworked into something like
+type Schema struct {
+	Tables []Table
+}
+
+type Table struct {
+	ColNames []string
+	ColTypes []string
+}
+// and it should be used for the left widget - tables info / list
+*/
 /*
 func getTableNames(db *sqlx.DB) []string {
 	tables := []string{}

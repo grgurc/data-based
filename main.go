@@ -1,69 +1,179 @@
 package main
 
 import (
+	"errors"
 	"io"
 	"log"
 	"os"
 
-	"github.com/gdamore/tcell/v2"
+	"github.com/awesome-gocui/gocui"
 	"github.com/grgurc/data-based/config"
 	"github.com/grgurc/data-based/query"
-	"github.com/grgurc/data-based/view"
+	"github.com/jmoiron/sqlx"
 )
 
-func drawText(s tcell.Screen, x1, y1, x2, y2 int, style tcell.Style, text string) {
-	row := y1
-	col := x1
-	for _, r := range []rune(text) {
-		s.SetContent(col, row, r, nil, style)
-		col++
-		if col >= x2 {
-			row++
-			col = x1
-		}
-		if row > y2 {
-			break
-		}
-	}
+const (
+	tableView   = "table"
+	commandView = "command"
+	listView    = "list"
+)
+
+type TableManager struct {
+	view  *gocui.View
+	query query.Query
 }
 
-func drawBox(s tcell.Screen, x1, y1, x2, y2 int, style tcell.Style, text string) {
-	if y2 < y1 {
-		y1, y2 = y2, y1
-	}
-	if x2 < x1 {
-		x1, x2 = x2, x1
-	}
-
-	// Fill background
-	for row := y1; row <= y2; row++ {
-		for col := x1; col <= x2; col++ {
-			s.SetContent(col, row, ' ', nil, style)
+// this one displays the result of the query
+func (m *TableManager) Layout(g *gocui.Gui) error {
+	maxX, maxY := g.Size()
+	if m.view != nil && m.query != nil {
+		m.view.Clear()
+		// m.view.SetOrigin() -> use this for scrolling the table
+		m.view.ViewLinesHeight()
+		err := m.query.Write(m.view)
+		if err != nil {
+			return err
 		}
 	}
 
-	// Draw borders
-	for col := x1; col <= x2; col++ {
-		s.SetContent(col, y1, tcell.RuneHLine, nil, style)
-		s.SetContent(col, y2, tcell.RuneHLine, nil, style)
-	}
-	for row := y1 + 1; row < y2; row++ {
-		s.SetContent(x1, row, tcell.RuneVLine, nil, style)
-		s.SetContent(x2, row, tcell.RuneVLine, nil, style)
+	if v, err := g.SetView(tableView, int(0.25*float32(maxX))+1, 0, maxX-1, maxY-6, 0); err != nil {
+		if !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+
+		v.Clear()
+
+		v.Title = "Query Result"
+		v.Subtitle = "test subtitel"
+		v.Wrap = false
+		v.Autoscroll = false
+
+		m.view = v
 	}
 
-	// Only draw corners if necessary
-	if y1 != y2 && x1 != x2 {
-		s.SetContent(x1, y1, tcell.RuneULCorner, nil, style)
-		s.SetContent(x2, y1, tcell.RuneURCorner, nil, style)
-		s.SetContent(x1, y2, tcell.RuneLLCorner, nil, style)
-		s.SetContent(x2, y2, tcell.RuneLRCorner, nil, style)
+	// set keybindings for this one here
+	// up down left right - scroll through table
+	return nil
+}
+
+type CommandManager struct {
+	view *gocui.View
+}
+
+// this one will display table names and search them or something
+func (m *CommandManager) Layout(g *gocui.Gui) error {
+	maxX, maxY := g.Size()
+	if v, err := g.SetView(commandView, 0, maxY-5, maxX-1, maxY-1, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+		if !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+
+		v.Clear()
+
+		v.Title = "Insert Query"
+		v.Editable = true
+		v.Overwrite = false
+		v.Wrap = false
+		v.Autoscroll = false
+
+		m.view = v
 	}
 
-	drawText(s, x1+1, y1+1, x2-1, y2-1, style, text)
+	// set keybindings here
+	return nil
+}
+
+type ListManager struct {
+	view *gocui.View
+}
+
+// this one displays a list of tables and some other stuff maybe dunno
+func (m *ListManager) Layout(g *gocui.Gui) error {
+	maxX, maxY := g.Size()
+	if v, err := g.SetView(listView, 0, 0, int(0.25*float32(maxX)), maxY-6, 0); err != nil && !errors.Is(err, gocui.ErrUnknownView) {
+		if !errors.Is(err, gocui.ErrUnknownView) {
+			return err
+		}
+
+		v.Title = "List"
+		v.Wrap = false
+		v.Autoscroll = false
+
+		m.view = v
+	}
+
+	// set keybindings here
+	return nil
+}
+
+// TODO: put in separate file/package
+type App struct {
+	g  *gocui.Gui
+	db *sqlx.DB
+
+	// managers for each view/window thing
+	tableManager   *TableManager
+	listManager    *ListManager
+	commandManager *CommandManager
+}
+
+func NewApp(g *gocui.Gui, db *sqlx.DB) *App {
+	a := &App{
+		g:  g,
+		db: db,
+	}
+
+	g.SupportOverlaps = false
+	g.Highlight = true
+	g.SelFgColor = gocui.ColorGreen
+
+	a.tableManager = &TableManager{}
+	a.commandManager = &CommandManager{}
+	a.listManager = &ListManager{}
+
+	g.SetManager(a.tableManager, a.listManager, a.commandManager)
+	v, err := g.SetCurrentView(tableView)
+	if err != nil {
+		panic(err) // so this stuff panics every time i guess
+	}
+
+	return a
+}
+
+func (a *App) BaseKeybindings() error {
+	if err := a.g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
+		return err
+	}
+
+	// Ctrl+Q activates Query Insert View
+	if err := a.g.SetKeybinding("", gocui.KeyCtrlQ, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.g.SetCurrentView(commandView)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// Ctrl+T activates Table View
+	if err := a.g.SetKeybinding("", gocui.KeyCtrlT, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.g.SetCurrentView(tableView)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	// Ctrl+L
+	if err := a.g.SetKeybinding("", gocui.KeyCtrlL, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		a.g.SetCurrentView(listView)
+		return nil
+	}); err != nil {
+		return err
+	}
+
+	return nil
 }
 
 func main() {
+	// logging
 	f, err := os.OpenFile("./logs.log", os.O_RDWR|os.O_CREATE|os.O_APPEND, 0666)
 	if err != nil {
 		log.Fatalf("error opening file: %v", err)
@@ -72,119 +182,40 @@ func main() {
 	wrt := io.Writer(f)
 	log.SetOutput(wrt)
 
+	// db conn + query
 	db := config.NewDbFromYaml("config/config_default.yml") // replace with your config
-	q := query.NewQuery(db, "SELECT * FROM workspaces")
-	q.Run()
-
-	// view.NewTable(nil, q.(*query.SelectQuery))
-	// return
-
-	defStyle := tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
-
-	// Initialize screen
-	s, err := tcell.NewScreen()
+	// running queries should be done from a goroutine
+	// in order not to halt the rest of the app
+	// TODO: check out goroutines in
+	q, err := query.New(db, "DELETE FROM workspaces WHERE id = 100;")
 	if err != nil {
-		log.Fatalf("%+v", err)
+		log.Panicln(err)
 	}
-	if err := s.Init(); err != nil {
-		log.Fatalf("%+v", err)
-	}
-	s.SetStyle(defStyle)
 
-	quit := func() {
-		// You have to catch panics in a defer, clean up, and
-		// re-raise them - otherwise your application can
-		// die without leaving any diagnostic trace.
-		maybePanic := recover()
-		s.Fini()
-		if maybePanic != nil {
-			log.Fatalf("%+v", maybePanic)
-			panic(maybePanic)
-		}
-	}
-	defer quit()
-
-	// handle table types
-	switch q := q.(type) {
-	case *query.SelectQuery:
-		table := view.NewTable(s, q)
-		table.Loop()
-	case *query.FailedQuery:
-		panic(q.Error())
-	case *query.ExecQuery:
-		return
-	}
-}
-
-/*
-
-func main2() {
-	db := newDB(newConfig())
-	q := query.NewQuery(db, "SELECT * FROM administrators;")
-	q.Run()
-
-	table := q.Drawable(120, 60)
-
-	defStyle := tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
-
-	// Initialize screen
-	s, err := tcell.NewScreen()
+	// gocui setup
+	g, err := gocui.NewGui(gocui.OutputTrue, true)
 	if err != nil {
-		log.Fatalf("%+v", err)
+		log.Panicln(err)
 	}
-	if err := s.Init(); err != nil {
-		log.Fatalf("%+v", err)
+	defer g.Close()
+
+	app := NewApp(g, db)
+	if err := app.BaseKeybindings(); err != nil {
+		log.Panicln(err)
 	}
-	s.SetStyle(defStyle)
+	log.Println(app)
+	log.Println(app.commandManager)
+	log.Println(app.listManager)
+	log.Println(app.tableManager)
 
-	fmt.Println(s.Size())
+	// just for now
+	app.tableManager.query = q
 
-	quit := func() {
-		// You have to catch panics in a defer, clean up, and
-		// re-raise them - otherwise your application can
-		// die without leaving any diagnostic trace.
-		maybePanic := recover()
-		s.Fini()
-		if maybePanic != nil {
-			panic(maybePanic)
-		}
-	}
-	defer quit()
-
-	return
-
-	for {
-		renderDrawable(s, defStyle, table)
-
-		// Update screen
-		s.Show()
-
-		// Poll event
-		ev := s.PollEvent()
-
-		// Process event
-		switch ev := ev.(type) {
-		case *tcell.EventResize:
-			s.Sync()
-		case *tcell.EventKey:
-			if ev.Key() == tcell.KeyEscape || ev.Key() == tcell.KeyCtrlC {
-				return
-			} else if ev.Key() == tcell.KeyLeft {
-
-			} else if ev.Key() == tcell.KeyRight {
-				continue
-			} else if ev.Rune() == 'C' || ev.Rune() == 'c' {
-				s.Clear()
-			}
-		}
+	if err := g.MainLoop(); err != nil && !errors.Is(err, gocui.ErrQuit) {
+		log.Panicln(err)
 	}
 }
 
-func main3() {
-	a := time.Now()
-	fmt.Println(a)
-	l, _ := time.LoadLocation("Asia/Almaty")
-	fmt.Println(a.In(l))
+func quit(g *gocui.Gui, v *gocui.View) error {
+	return gocui.ErrQuit
 }
-
-*/
