@@ -29,7 +29,7 @@ func (m *TableManager) Layout(g *gocui.Gui) error {
 	if m.view != nil && m.query != nil {
 		m.view.Clear()
 		// m.view.SetOrigin() -> use this for scrolling the table
-		m.view.ViewLinesHeight()
+		log.Println(m.view.ViewBuffer())
 		err := m.query.Write(m.view)
 		if err != nil {
 			return err
@@ -44,7 +44,7 @@ func (m *TableManager) Layout(g *gocui.Gui) error {
 		v.Clear()
 
 		v.Title = "Query Result"
-		v.Subtitle = "test subtitel"
+		// v.Subtitle = "test subtitel"
 		v.Wrap = false
 		v.Autoscroll = false
 
@@ -67,8 +67,6 @@ func (m *CommandManager) Layout(g *gocui.Gui) error {
 		if !errors.Is(err, gocui.ErrUnknownView) {
 			return err
 		}
-
-		v.Clear()
 
 		v.Title = "Insert Query"
 		v.Editable = true
@@ -132,39 +130,42 @@ func NewApp(g *gocui.Gui, db *sqlx.DB) *App {
 	a.listManager = &ListManager{}
 
 	g.SetManager(a.tableManager, a.listManager, a.commandManager)
-	v, err := g.SetCurrentView(tableView)
+	_, err := g.SetCurrentView(tableView)
 	if err != nil {
-		panic(err) // so this stuff panics every time i guess
+		log.Println(err) // so this stuff panics every time i guess
 	}
 
 	return a
 }
 
 func (a *App) BaseKeybindings() error {
-	if err := a.g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, quit); err != nil {
+	// quit
+	if err := a.g.SetKeybinding("", gocui.KeyCtrlC, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
+		return gocui.ErrQuit
+	}); err != nil {
 		return err
 	}
 
 	// Ctrl+Q activates Query Insert View
 	if err := a.g.SetKeybinding("", gocui.KeyCtrlQ, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		a.g.SetCurrentView(commandView)
-		return nil
+		_, err := a.g.SetCurrentView(commandView)
+		return err
 	}); err != nil {
 		return err
 	}
 
 	// Ctrl+T activates Table View
 	if err := a.g.SetKeybinding("", gocui.KeyCtrlT, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		a.g.SetCurrentView(tableView)
-		return nil
+		_, err := a.g.SetCurrentView(tableView)
+		return err
 	}); err != nil {
 		return err
 	}
 
 	// Ctrl+L
 	if err := a.g.SetKeybinding("", gocui.KeyCtrlL, gocui.ModNone, func(g *gocui.Gui, v *gocui.View) error {
-		a.g.SetCurrentView(listView)
-		return nil
+		_, err := a.g.SetCurrentView(listView)
+		return err
 	}); err != nil {
 		return err
 	}
@@ -214,8 +215,4 @@ func main() {
 	if err := g.MainLoop(); err != nil && !errors.Is(err, gocui.ErrQuit) {
 		log.Panicln(err)
 	}
-}
-
-func quit(g *gocui.Gui, v *gocui.View) error {
-	return gocui.ErrQuit
 }
